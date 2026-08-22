@@ -671,6 +671,7 @@
 
   let db = null;
   let cloudReady = false;
+  let cloudLoaded = false;
   let suppressCloudPush = false;
   try{
     if(firebaseConfig.apiKey && !firebaseConfig.apiKey.startsWith('COLE_') && window.firebase){
@@ -694,17 +695,19 @@
     }catch(err){ /* localStorage indisponível (ex.: aba anônima) — segue sem cache local */ }
   }
 
-  function pushToCloud(){
-    if(!cloudReady || suppressCloudPush) return;
+  function pushToCloud(force=false){
+    // Do not write the local cache before the shared data has been loaded.
+    // This prevents a second browser from replacing newer team data at startup.
+    if(!cloudReady || suppressCloudPush || (!cloudLoaded && !force)) return;
     cloudDocRef.set({ events, categories, people, updatedAt: Date.now() })
       .catch(err => console.warn('Não foi possível sincronizar com o Firebase agora:', err));
   }
 
   function applyRemoteData(data){
     suppressCloudPush = true;
-    if(Array.isArray(data.events) && data.events.length) events = data.events;
-    if(Array.isArray(data.categories) && data.categories.length) categories = data.categories;
-    if(Array.isArray(data.people) && data.people.length) people = data.people;
+    if(Array.isArray(data.events)) events = data.events;
+    if(Array.isArray(data.categories)) categories = data.categories;
+    if(Array.isArray(data.people)) people = data.people;
     persistLocal();
     render();
     suppressCloudPush = false;
@@ -717,8 +720,10 @@
       if(snap.exists){
         applyRemoteData(snap.data());
       } else {
+        cloudLoaded = true;
         pushToCloud(); // primeira vez: semeia o documento compartilhado
       }
+      cloudLoaded = true;
       setSyncStatus('ativo');
       cloudDocRef.onSnapshot(snap=>{
         if(snap.exists) applyRemoteData(snap.data());
@@ -937,12 +942,12 @@
     el.querySelectorAll('[data-cat-color]').forEach(inp=>{
       inp.addEventListener('input', ()=>{
         const cat = categories.find(x=>x.id===inp.dataset.catColor);
-        if(cat){ cat.color = inp.value; render(); }
+        if(cat){ cat.color = inp.value; render(true); }
       });
     });
   }
 
-  function render(){
+  function render(sync=false){
     $('#monthTitle').textContent = `${MONTHS[month]} ${YEAR}`;
     renderLegend();
     buildTabs();
@@ -954,7 +959,8 @@
     buildList('listViagem', generalCats);
     buildList('listFeriado', ['feriado']);
     buildList('listFolga', ['folga']);
-    saveState();
+    if(sync) saveState();
+    else persistLocal();
   }
 
   $('#prev').addEventListener('click', ()=>{ month = (month+11)%12; selectedDay=null; render(); });
@@ -969,7 +975,7 @@
       const ev = events.find(x=>x.id===delBtn.dataset.del);
       if(ev && confirm(`Excluir "${ev.t}"?`)){
         events = events.filter(x=>x.id!==delBtn.dataset.del);
-        render();
+        render(true);
       }
     }
   });
@@ -1039,13 +1045,13 @@
     el.querySelectorAll('[data-person-color]').forEach(inp=>{
       inp.addEventListener('input', ()=>{
         const p = people.find(x=>x.name===inp.dataset.personColor);
-        if(p){ p.color = inp.value; renderPeopleList(); render(); }
+        if(p){ p.color = inp.value; renderPeopleList(); render(true); }
       });
     });
     el.querySelectorAll('[data-person-del]').forEach(btn=>{
       btn.addEventListener('click', ()=>{
         people = people.filter(x=>x.name!==btn.dataset.personDel);
-        renderPeopleList(); render();
+        renderPeopleList(); render(true);
       });
     });
   }
@@ -1064,7 +1070,7 @@
     $('#newPersonName').value = '';
     $('#newPersonColor').value = '#4F6D8C';
     renderPeopleList();
-    render();
+    render(true);
   });
 
   /* ---------- categories panel ---------- */
@@ -1082,20 +1088,20 @@
     el.querySelectorAll('[data-cat-name]').forEach(inp=>{
       inp.addEventListener('input', ()=>{
         const c = categories.find(x=>x.id===inp.dataset.catName);
-        if(c){ c.label = inp.value; render(); }
+        if(c){ c.label = inp.value; render(true); }
       });
     });
     el.querySelectorAll('[data-cat-color2]').forEach(inp=>{
       inp.addEventListener('input', ()=>{
         const c = categories.find(x=>x.id===inp.dataset.catColor2);
-        if(c){ c.color = inp.value; render(); }
+        if(c){ c.color = inp.value; render(true); }
       });
     });
     el.querySelectorAll('[data-cat-del]').forEach(btn=>{
       btn.addEventListener('click', ()=>{
         if(!confirm('Remover esta categoria? Eventos que a usam ficam sem cor/nome de categoria definidos.')) return;
         categories = categories.filter(x=>x.id!==btn.dataset.catDel);
-        renderCategoriesList(); render();
+        renderCategoriesList(); render(true);
       });
     });
   }
@@ -1115,7 +1121,7 @@
     $('#newCatName').value = '';
     $('#newCatColor').value = '#4F6D8C';
     renderCategoriesList();
-    render();
+    render(true);
   });
 
   form.addEventListener('submit', (e)=>{
@@ -1142,7 +1148,7 @@
       events.push(Object.assign({id:uid()}, payload));
     }
     closeModal();
-    render();
+    render(true);
   });
 
   $('#btnExport').addEventListener('click', ()=>{
@@ -1169,7 +1175,7 @@
         if(!Array.isArray(data) && Array.isArray(data.categories) && data.categories.length) categories = data.categories;
         if(!Array.isArray(data) && Array.isArray(data.people) && data.people.length) people = data.people;
         selectedDay = null;
-        render();
+        render(true);
       }catch(err){
         alert('Não foi possível ler este arquivo. Verifique se é um JSON exportado por esta agenda.');
       }
